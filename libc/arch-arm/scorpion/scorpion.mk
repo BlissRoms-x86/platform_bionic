@@ -21,11 +21,8 @@ libc_bionic_src_files_arm += \
     arch-arm/cortex-a15/bionic/__strcpy_chk.S \
     arch-arm/cortex-a15/bionic/strlen.S \
 
-# Use krait versions of memset/strcmp
+# Use krait versions of memset/strcmp/memmove
 libc_bionic_src_files_arm += \
     arch-arm/krait/bionic/memset.S \
     arch-arm/krait/bionic/strcmp.S \
-
-# Use Denver version of memmove
-libc_bionic_src_files_arm += \
-    arch-arm/denver/bionic/memmove.S
+    arch-arm/krait/bionic/memmove.S
