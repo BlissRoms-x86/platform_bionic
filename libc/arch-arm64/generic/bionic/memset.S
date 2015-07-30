@@ -75,48 +75,10 @@
 
 #define L(l) .L ## l
 
-#define dstin		x0
-#define count		x2
-#define val		w1
-#define tmp1		x3
-#define tmp1w		w3
-#define tmp2		x4
-#define tmp2w		w4
-#define zva_len_x	x5
-#define zva_len		w5
-#define zva_bits_x	x6
-
-#define A_l		x7
-#define A_lw		w7
-#define dst		x8
-#define tmp3w		w9
-
 ENTRY(memset)
 
-	mov	dst, dstin		/* Preserve return value.  */
-	ands	A_lw, val, #255
-	b.eq	.Lzero_mem
-	orr	A_lw, A_lw, A_lw, lsl #8
-	orr	A_lw, A_lw, A_lw, lsl #16
-	orr	A_l, A_l, A_l, lsl #32
-.Ltail_maybe_long:
-	cmp	count, #64
-	b.ge	.Lnot_short
-.Ltail_maybe_tiny:
-	cmp	count, #15
-	b.le	.Ltail15tiny
-.Ltail63:
-	ands	tmp1, count, #0x30
-	b.eq	.Ltail15
-	add	dst, dst, tmp1
-	cmp	tmp1w, #0x20
-	b.eq	1f
-	b.lt	2f
-	stp	A_l, A_l, [dst, #-48]
-1:
-	stp	A_l, A_l, [dst, #-32]
-2:
-	stp	A_l, A_l, [dst, #-16]
+	dup	v0.16B, valw
+	add	dstend, dstin, count
 
 	cmp	count, 96
 	b.hi	L(set_long)
@@ -211,7 +173,6 @@ L(zva_64):
 	stp	q0, q0, [dstend, -64]
 	stp	q0, q0, [dstend, -32]
 	ret
-END(memset)
 
 	.p2align 3
 L(zva_128):
