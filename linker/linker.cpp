@@ -2461,7 +2461,7 @@ void* do_dlopen(const char* name, int flags, const android_dlextinfo* extinfo,
 
   ProtectedDataGuard guard;
   reset_g_active_shim_libs();
-  soinfo* si = find_library(ns, name, flags, extinfo, caller);
+  soinfo* si = find_library(ns, translated_name, flags, extinfo, caller);
   if (si != nullptr) {
     si->call_constructors();
     return si->to_handle();
