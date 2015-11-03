@@ -1230,23 +1230,19 @@ typedef linked_list_t<soinfo> SoinfoLinkedList;
 typedef linked_list_t<const char> StringLinkedList;
 typedef std::vector<LoadTask*> LoadTaskList;
 
-static soinfo* find_library(android_namespace_t* ns,
-                           const char* name, int rtld_flags,
-                           const android_dlextinfo* extinfo,
-                           soinfo* needed_by);
+static soinfo* find_library(const char* name, int rtld_flags, const android_dlextinfo* extinfo);
 
 // g_ld_all_shim_libs maintains the references to memory as it used
 // in the soinfo structures and in the g_active_shim_libs list.
 
-typedef std::pair<std::string, std::string> ShimDescriptor;
-static std::vector<ShimDescriptor> g_ld_all_shim_libs;
+static std::vector<std::string> g_ld_all_shim_libs;
 
 // g_active_shim_libs are all shim libs that are still eligible
 // to be loaded.  We must remove a shim lib from the list before
 // we load the library to avoid recursive loops (load shim libA
 // for libB where libA also links against libB).
 
-static linked_list_t<const ShimDescriptor> g_active_shim_libs;
+static linked_list_t<const std::string> g_active_shim_libs;
 
 static void reset_g_active_shim_libs(void) {
   g_active_shim_libs.clear();
@@ -1256,39 +1252,43 @@ static void reset_g_active_shim_libs(void) {
 }
 
 static void parse_LD_SHIM_LIBS(const char* path) {
-  g_ld_all_shim_libs.clear();
-  if (path != nullptr) {
-    // We have historically supported ':' as well as ' ' in LD_SHIM_LIBS.
-    for (const auto& pair : android::base::Split(path, " :")) {
-      size_t pos = pair.find('|');
-      if (pos > 0 && pos < pair.length() - 1) {
-        auto desc = std::pair<std::string, std::string>(pair.substr(0, pos), pair.substr(pos + 1));
-        g_ld_all_shim_libs.push_back(desc);
-      }
-    }
-  }
+  parse_path(path, " :", &g_ld_all_shim_libs);
   reset_g_active_shim_libs();
 }
 
+static bool shim_lib_matches(const char *shim_lib, const char *realpath) {
+  const char *sep = strchr(shim_lib, '|');
+  return sep != nullptr && strncmp(realpath, shim_lib, sep - shim_lib) == 0;
+}
+
 template<typename F>
-static void for_each_matching_shim(const char *const path, F action) {
+static void shim_libs_for_each(const char *const path, F action) {
   if (path == nullptr) return;
   INFO("Finding shim libs for \"%s\"\n", path);
-  std::vector<const ShimDescriptor *> matched;
+  std::vector<const std::string *> matched;
 
-  g_active_shim_libs.for_each([&](const ShimDescriptor *a_pair) {
-    if (a_pair->first == path) {
+  g_active_shim_libs.for_each([&](const std::string *a_pair) {
+    const char *pair = a_pair->c_str();
+    if (shim_lib_matches(pair, path)) {
       matched.push_back(a_pair);
     }
   });
 
-  g_active_shim_libs.remove_if([&](const ShimDescriptor *a_pair) {
-    return a_pair->first == path;
+  g_active_shim_libs.remove_if([&](const std::string *a_pair) {
+    const char *pair = a_pair->c_str();
+    return shim_lib_matches(pair, path);
   });
 
   for (const auto& one_pair : matched) {
-    INFO("Injecting shim lib \"%s\" as needed for %s", one_pair->second.c_str(), path);
-    action(one_pair->second.c_str());
+    const char* const pair = one_pair->c_str();
+    const char* sep = strchr(pair, '|');
+    soinfo *child = find_library(sep+1, RTLD_GLOBAL, nullptr);
+    if (child) {
+      INFO("Using shim lib \"%s\"\n", sep+1);
+      action(child);
+    } else {
+      PRINT("Shim lib \"%s\" can not be loaded, ignoring.", sep+1);
+    }
   }
 }
 
@@ -1300,7 +1300,7 @@ static void for_each_matching_shim(const char *const path, F action) {
 // walk_dependencies_tree returns false if walk was terminated
 // by the action and true otherwise.
 template<typename F>
-static bool walk_dependencies_tree(soinfo* root_soinfos[], size_t root_soinfos_size, F action) {
+static bool walk_dependencies_tree(soinfo* root_soinfos[], size_t root_soinfos_size, bool do_shims, F action) {
   SoinfoLinkedList visit_list;
   SoinfoLinkedList visited;
 
@@ -1320,6 +1320,13 @@ static bool walk_dependencies_tree(soinfo* root_soinfos[], size_t root_soinfos_s
 
     visited.push_back(si);
 
+    if (do_shims) {
+      shim_libs_for_each(si->get_realpath(), [&](soinfo* child) {
+        si->add_child(child);
+        visit_list.push_back(child);
+      });
+    }
+
     si->get_children().for_each([&](soinfo* child) {
       visit_list.push_back(child);
     });
@@ -1335,7 +1342,7 @@ static const ElfW(Sym)* dlsym_handle_lookup(soinfo* root, soinfo* skip_until,
   const ElfW(Sym)* result = nullptr;
   bool skip_lookup = skip_until != nullptr;
 
-  walk_dependencies_tree(&root, 1, [&](soinfo* current_soinfo) {
+  walk_dependencies_tree(&root, 1, false, [&](soinfo* current_soinfo) {
     if (skip_lookup) {
       skip_lookup = current_soinfo != skip_until;
       return true;
@@ -2192,6 +2199,7 @@ static bool find_libraries(android_namespace_t* ns,
   walk_dependencies_tree(
       (start_with != nullptr && add_as_children) ? &start_with : soinfos,
       (start_with != nullptr && add_as_children) ? 1 : soinfos_count,
+      true,
       [&] (soinfo* si) {
     local_group.push_back(si);
     return true;
@@ -2463,7 +2471,7 @@ void* do_dlopen(const char* name, int flags, const android_dlextinfo* extinfo,
 
   ProtectedDataGuard guard;
   reset_g_active_shim_libs();
-  soinfo* si = find_library(ns, translated_name, flags, extinfo, caller);
+  soinfo* si = find_library(ns, name, flags, extinfo, caller);
   if (si != nullptr) {
     si->call_constructors();
     return si->to_handle();
