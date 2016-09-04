@@ -58,12 +58,8 @@ ifeq ($(TARGET_IS_64_BIT),true)
 LOCAL_CPPFLAGS += -DTARGET_IS_64_BIT
 endif
 
-ifeq ($(TARGET_NEEDS_PLATFORM_TEXT_RELOCATIONS),true)
-ifeq ($(user_variant),user)
-$(error Do not enable text relocations on user builds)
-else
-LOCAL_CPPFLAGS += -DTARGET_NEEDS_PLATFORM_TEXT_RELOCATIONS
-endif
+ifneq ($(filter msm7x27a msm7x30 msm8660 msm8960,$(TARGET_BOARD_PLATFORM)),)
+LOCAL_CPPFLAGS += -DUSE_LEGACY_BLOBS
 endif
 
 # We need to access Bionic private headers in the linker.
