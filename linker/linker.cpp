@@ -3619,6 +3619,7 @@ bool soinfo::link_image(const soinfo_list_t& global_group, const soinfo_list_t& 
 
 #if !defined(__LP64__)
   if (has_text_relocations) {
+#if !defined(__i386__) // ffmpeg says that they require text relocations on x86
     // Fail if app is targeting M or above.
     int app_target_api_level = get_application_target_sdk_version();
     if (app_target_api_level >= __ANDROID_API_M__) {
@@ -3634,6 +3635,7 @@ bool soinfo::link_image(const soinfo_list_t& global_group, const soinfo_list_t& 
                               "\"%s\" has text relocations",
                               get_realpath());
     add_dlwarning(get_realpath(), "text relocations");
+#endif
     if (phdr_table_unprotect_segments(phdr, phnum, load_bias) < 0) {
       DL_ERR("can't unprotect loadable segments for \"%s\": %s", get_realpath(), strerror(errno));
       return false;
